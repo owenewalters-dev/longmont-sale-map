@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Sale Map" />
+  <title>Longmont Sale Map</title>
+  <style>
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body, #root { margin: 0; padding: 0; height: 100%; width: 100%; overflow: hidden; background: #f5f0e8; }
+    body { font-family: 'Georgia', 'Times New Roman', serif; }
+    ::-webkit-scrollbar { display: none; }
+    input, select, textarea, button { font-family: inherit; }
+    @keyframes fadein { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+    @keyframes slideup { from { transform:translateY(100%); } to { transform:translateY(0); } }
+    .card-enter { animation: fadein 0.2s ease; }
+    .sheet-enter { animation: slideup 0.25s ease; }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script type="module">
+import { useState, useRef, useEffect, useCallback, createElement as h } from 'https://esm.sh/react@18';
+import { createRoot } from 'https://esm.sh/react-dom@18/client';
+
+// ── DATA ─────────────────────────────────────────────────────────────────
+
+const SUBDIVISIONS = {
+1:[“Sundance”,“Somerset Meadows”,“Renaissance”,“Pelican Shores Lake”,“Meadowview”,“Watersong at Creekside”,“Sienna Park”,“Silver Meadows”,“Tramonto”],
+2:[“Harvest Junction”,“Mill Village”,“Riverbend at Mill Village”,“Lashley Village”,“Heritage”,“Poplar Grove”,“Twin Villas”],
+3:[“Creekside”,“Nelson Park”,“Gunbarrel Estates”,“Lake Valley Estates”,“Kingsbridge”,“Prospect”],
+4:[“Idaho Creek”,“Lighthouse Cove”,“Meadow Vale Farm”,“The Elms at Meadow Vale”,“Melody Valley”],
+5:[“Fox Hill”,“Fox Creek Farm”,“Shadow Grass Park”,“Dodd Estates”,“Hilltop Village”,“Quail Crossing”,“Pinnacle”,“Sonoma Village”,“Villas at Ute Creek”],
+6:[“Fox Meadow”,“Park Ridge”,“Spring Valley”,“Stoney Ridge”,“Wolf Creek”,“Yeager Farm”,“Champion Greens”,“Longmont Estates”,“Lake Shore”],
+7:[“Old Town”,“Prospect”,“Rainbow Ridge”,“Rider Ridge”,“Dollhouse Village”],
+8:[“Hover Crossing”,“Hover Ridge”,“Hover Woods”,“Denio West”,“The Meadows”,“Fairview”,“Sunfield”],
+9:[“Blue Mountain Vista”,“Meadowlark”,“Park North”,“Prairie Village”,“Pleasant Valley”,“Villas at Pleasant Valley”],
+10:[“Horizon West”,“Horizon Parkway”,“The Shores at McIntosh Lake”,“Golden Bear”,“Provenance”],
+11:[“Clover Creek”,“Meadowview”],
+12:[“Clover Basin”,“Nelson Park”,“Gunbarrel Estates”],
+};
+
+const ZONES=[
+{id:1,name:“Zone 1”,desc:“Far south — Pike Rd / 287”,income:“mixed”,safety:“mixed”},
+{id:2,name:“Zone 2”,desc:“Ken Pratt Blvd / S. Hover”,income:“mixed”,safety:“mixed”},
+{id:3,name:“Zone 3”,desc:“SE — E. Ken Pratt / S. Main”,income:“high”,safety:“high”},
+{id:4,name:“Zone 4”,desc:“East — Pace St / E. 3rd–9th”,income:“high”,safety:“high”},
+{id:5,name:“Zone 5”,desc:“NE — County Line / SH66”,income:“high”,safety:“high”},
+{id:6,name:“Zone 6”,desc:“North central — Main / 17th–21st”,income:“mixed”,safety:“high”},
+{id:7,name:“Zone 7”,desc:“Central east — Martin / 3rd–9th”,income:“low”,safety:“mixed”},
+{id:8,name:“Zone 8”,desc:“Central west — Hover / 3rd–9th”,income:“low”,safety:“mixed”},
+{id:9,name:“Zone 9”,desc:“NW — Francis / 17th–21st”,income:“mixed”,safety:“high”},
+{id:10,name:“Zone 10”,desc:“Far west — Airport Rd / Hover”,income:“mixed”,safety:“high”},
+{id:11,name:“Zone 11”,desc:“SW — 75th St residential”,income:“mixed”,safety:“high”},
+{id:12,name:“Zone 12”,desc:“Clover Basin Dr / S. Airport Rd”,income:“high”,safety:“high”},
+];
+
+const STATUS={
+want:{label:“Want to Go”,color:”#f59e0b”,dot:“🟡”},
+priority:{label:“Priority”,color:”#ef4444”,dot:“🔴”},
+visited:{label:“Visited”,color:”#6b7280”,dot:“⚫”},
+skip:{label:“Skip”,color:”#9ca3af”,dot:“⬜”},
+};
+const INC={
+high:{label:“High Income”,color:”#2d6a4f”,bg:”#d1fae5”,icon:“💰”},
+mixed:{label:“Mixed”,color:”#92600a”,bg:”#fef3c7”,icon:”〰️”},
+low:{label:“Lower Income”,color:”#991b1b”,bg:”#fee2e2”,icon:“📦”},
+};
+const SAF={
+high:{label:“High”,color:”#1d4ed8”,bg:”#dbeafe”,icon:“✅”},
+mixed:{label:“Mixed”,color:”#92600a”,bg:”#fef3c7”,icon:“⚠️”},
+};
+
+const ITEM_EMOJIS={Clothing:“👕”,Furniture:“🪑”,Electronics:“📡”,Kitchen:“🍳”,Books:“📚”,Sports:“🚲”,Outdoors:“🏕️”,Music:“🎸”,Toys:“🧩”};
+const PALETTES=[[”#e8d5b7”,”#c4a97d”],[”#b7d5e8”,”#7dafc4”],[”#d5e8b7”,”#a9c47d”],[”#e8b7d5”,”#c47daf”],[”#e8e0b7”,”#c4b87d”],[”#c9b7e8”,”#9f7dc4”]];
+
+const MOCK_ITEMS=[
+{name:“Vintage Levi’s 501s”,category:“Clothing”,price:”$8”,desc:“Dark wash, 34x32. Great reseller find.”},
+{name:“Mid-century Side Table”,category:“Furniture”,price:”$25”,desc:“Solid walnut, tapered legs. Structurally perfect.”},
+{name:“DJI Phantom Props”,category:“Electronics”,price:”$12”,desc:“Unused OEM props still in bag. Fits P3 & P4.”},
+{name:“Cast Iron Skillet 12"”,category:“Kitchen”,price:”$15”,desc:“Lodge pre-seasoned. Well-loved, great shape.”},
+{name:“Patagonia Fleece XL”,category:“Clothing”,price:”$20”,desc:“Synchilla snap-T. Faded nicely. No snags.”},
+{name:“Vintage Polaroid”,category:“Electronics”,price:”$18”,desc:“OneStep Express. Tested and working.”},
+{name:“Hardcover Lot (12)”,category:“Books”,price:”$10”,desc:“Fiction and history mix. Some like-new.”},
+{name:“Trek Mountain Bike”,category:“Sports”,price:”$85”,desc:“21-speed, 26" wheels. Needs tune-up.”},
+{name:“Stanley 40oz”,category:“Outdoors”,price:”$10”,desc:“Original green. Minor scuffs on base.”},
+{name:“Vintage Pyrex Set”,category:“Kitchen”,price:”$30”,desc:“4-piece nesting bowls, primary colors.”},
+{name:“Nike Air Max 95 Sz10”,category:“Clothing”,price:”$35”,desc:“Grey/white. Worn a few times.”},
+{name:“Cuisinart Processor”,category:“Kitchen”,price:”$20”,desc:“11-cup, all blades. Works great.”},
+{name:“Acoustic Guitar”,category:“Music”,price:”$45”,desc:“Fender CD-60S. Small crack in nut.”},
+{name:“Lego Star Wars”,category:“Toys”,price:”$22”,desc:“Mostly complete, may miss 2-3 pieces.”},
+{name:“Carhartt WIP Jacket M”,category:“Clothing”,price:”$28”,desc:“Detroit jacket, blanket-lined.”},
+];
+
+const MOCK_SALES=Array.from({length:8},(*,i)=>{
+const zone=ZONES[i%ZONES.length];
+const sub=(SUBDIVISIONS[zone.id]||[])[0]||””;
+const items=Array.from({length:3+(i%4)},(*,j)=>MOCK_ITEMS[(i*3+j)%MOCK_ITEMS.length]);
+const addrs=[“412 Bowen St”,“1803 Gay St”,“623 Collyer St”,“2214 Tulip St”,“744 Emery St”,“1129 Lashley St”,“330 Terry St”,“955 Button Rock Dr”];
+const times=[“7:00 AM”,“7:30 AM”,“8:00 AM”,“8:00 AM”,“9:00 AM”,“7:00 AM”,“8:30 AM”,“9:00 AM”];
+const descs=[“Moving sale — downsizing after 20 years”,“Estate cleanout — everything must go”,“Empty nesters selling everything”,“Family moving to Denver”,“College grad clearing out”,“Spring cleanout sale”,“Remodel leftovers + furniture”,“Retirement downsize — priced to move”];
+return {id:`mock-${i}`,address:addrs[i],subdivision:sub,zone:zone.id,zoneName:zone.name,time:times[i],date:“Sat Jun 7”,distance:`${(0.4+i*0.3).toFixed(1)} mi`,description:descs[i]+”. Lots of great stuff, priced to move fast.”,items,isMock:true};
+});
+
+function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2);}
+function openMaps(addr){window.open(`https://maps.apple.com/?q=${encodeURIComponent(addr+", Longmont, CO")}&dirflg=d`,”_blank”);}
+function openRoute(stops){
+if(!stops.length)return;
+if(stops.length===1){openMaps(stops[0].address);return;}
+window.open(“https://www.google.com/maps/dir/”+stops.map(s=>encodeURIComponent(s.address+”, Longmont, CO”)).join(”/”),”_blank”);
+}
+
+// ── STYLES ────────────────────────────────────────────────────────────────
+const S={
+// colours
+green:”#1c3a2a”, gold:”#b8882a”, cream:”#f5f0e8”, midgreen:”#2d6a4f”,
+// reusable
+input:{width:“100%”,padding:“11px 13px”,borderRadius:8,border:“2px solid #c9bfa8”,background:”#fff”,fontSize:15,marginBottom:13,color:”#1a1a1a”,outline:“none”},
+label:{display:“block”,fontSize:11,fontWeight:“bold”,color:”#5a5a5a”,marginBottom:4,textTransform:“uppercase”,letterSpacing:.5},
+pill:(active,color)=>({padding:“6px 14px”,borderRadius:20,border:`2px solid ${active?color:"#c9bfa8"}`,background:active?color+“22”:“transparent”,color:active?color:”#777”,fontSize:13,cursor:“pointer”,fontWeight:active?“bold”:“normal”,whiteSpace:“nowrap”}),
+btn:(bg,color,border)=>({background:bg,color,border:border||“none”,borderRadius:10,padding:“13px 0”,fontSize:15,fontWeight:“bold”,cursor:“pointer”,width:“100%”}),
+};
+
+// ── ITEM SLIDE ────────────────────────────────────────────────────────────
+function ItemSlide({item,index}){
+const [bg,ac]=PALETTES[index%PALETTES.length];
+return h(‘div’,{style:{minWidth:“100%”,height:“100%”,background:`linear-gradient(145deg,${bg},${ac}22)`,display:“flex”,flexDirection:“column”,alignItems:“center”,justifyContent:“center”,padding:“24px 20px”,textAlign:“center”}},
+h(‘div’,{style:{width:150,height:150,borderRadius:20,background:`linear-gradient(135deg,${ac}66,${bg})`,border:`3px solid ${ac}`,display:“flex”,alignItems:“center”,justifyContent:“center”,marginBottom:18,fontSize:52,boxShadow:`0 8px 24px ${ac}44`}},
+ITEM_EMOJIS[item.category]||“📦”),
+h(‘div’,{style:{fontSize:11,fontWeight:“bold”,color:ac,textTransform:“uppercase”,letterSpacing:1,marginBottom:5}},item.category),
+h(‘div’,{style:{fontSize:22,fontWeight:“bold”,color:”#1a1a1a”,marginBottom:6,lineHeight:1.2}},item.name),
+h(‘div’,{style:{fontSize:30,fontWeight:“bold”,color:”#2d6a4f”,marginBottom:10}},item.price),
+h(‘div’,{style:{fontSize:14,color:”#555”,lineHeight:1.5,maxWidth:260}},item.desc),
+);
+}
+
+// ── EXPLORE CARD ──────────────────────────────────────────────────────────
+function ExploreCard({sale,fav,onFav,inRoute,onRoute,h}){
+const scrollRef=useRef(null);
+const [activeSlide,setActiveSlide]=useState(0);
+const total=1+sale.items.length;
+const zone=ZONES.find(z=>z.id===sale.zone);
+const inc=zone?INC[zone.income]:null;
+
+const onHScroll=()=>{
+if(!scrollRef.current)return;
+setActiveSlide(Math.round(scrollRef.current.scrollLeft/scrollRef.current.offsetWidth));
+};
+
+return h(‘div’,{style:{height:“100%”,background:”#0d1f16”,position:“relative”,overflow:“hidden”,flexShrink:0}},
+// horizontal scroller
+h(‘div’,{ref:scrollRef,onScroll:onHScroll,style:{display:“flex”,overflowX:“scroll”,overflowY:“hidden”,scrollSnapType:“x mandatory”,height:“100%”,width:“100%”}},
+// slide 0: overview
+h(‘div’,{style:{minWidth:“100%”,height:“100%”,scrollSnapAlign:“start”,background:“linear-gradient(180deg,#1c3a2a 0%,#0d1510 100%)”,display:“flex”,flexDirection:“column”,padding:“env(safe-area-inset-top,20px) 22px 100px”,boxSizing:“border-box”,overflowY:“auto”,gap:0}},
+h(‘div’,{style:{display:“flex”,alignItems:“flex-start”,justifyContent:“space-between”,marginBottom:14,marginTop:8}},
+h(‘div’,null,
+h(‘div’,{style:{fontSize:12,color:”#b8882a”,fontWeight:“bold”,marginBottom:5}},`📍 ${sale.distance} · ${sale.zoneName}${sale.subdivision?" · "+sale.subdivision:""}`),
+h(‘div’,{style:{fontSize:22,fontWeight:“bold”,color:”#f5f0e8”,lineHeight:1.2}},sale.address),
+h(‘div’,{style:{fontSize:13,color:”#8aab90”,marginTop:5}},`🕐 ${sale.time} · ${sale.date}`),
+),
+inc&&h(‘span’,{style:{fontSize:10,padding:“3px 8px”,borderRadius:8,background:inc.bg,color:inc.color,fontWeight:“bold”,whiteSpace:“nowrap”,marginLeft:8,marginTop:2}},`${inc.icon} ${inc.label}`),
+),
+h(‘div’,{style:{fontSize:14,color:”#c8d8cc”,lineHeight:1.6,marginBottom:18}},sale.description),
+h(‘div’,null,
+h(‘div’,{style:{fontSize:11,color:”#8aab90”,textTransform:“uppercase”,letterSpacing:1,marginBottom:8}},`${sale.items.length} items — swipe right to browse →`),
+h(‘div’,{style:{display:“flex”,flexWrap:“wrap”,gap:6}},
+sale.items.map((item,i)=>h(‘button’,{key:i,onClick:()=>{scrollRef.current?.scrollTo({left:(i+1)*scrollRef.current.offsetWidth,behavior:“smooth”})},style:{background:”#2c4a38”,color:”#a8c8b0”,border:“1px solid #3a5a47”,borderRadius:20,padding:“5px 12px”,fontSize:12,cursor:“pointer”}},`${item.name} · ${item.price}`)),
+),
+),
+),
+// item slides
+…sale.items.map((item,i)=>h(‘div’,{key:i,style:{minWidth:“100%”,height:“100%”,scrollSnapAlign:“start”}},h(ItemSlide,{item,index:i+sale.zone}))),
+),
+// dot indicators
+h(‘div’,{style:{position:“absolute”,top:“env(safe-area-inset-top,14px)”,left:0,right:0,display:“flex”,justifyContent:“center”,gap:5,pointerEvents:“none”,paddingTop:14}},
+Array.from({length:total}).map((_,i)=>h(‘div’,{key:i,style:{width:i===activeSlide?18:6,height:6,borderRadius:3,background:i===activeSlide?”#b8882a”:“rgba(255,255,255,0.3)”,transition:“width 0.2s”}})),
+),
+// bottom bar
+h(‘div’,{style:{position:“absolute”,bottom:0,left:0,right:0,background:“linear-gradient(0deg,rgba(0,0,0,0.9) 0%,transparent 100%)”,padding:`16px 16px calc(env(safe-area-inset-bottom,0px) + 16px)`,display:“flex”,gap:10,alignItems:“center”}},
+h(‘button’,{onClick:()=>openMaps(sale.address),style:{flex:1,background:”#1c3a2a”,color:”#fff”,border:“2px solid #2d6a4f”,borderRadius:10,padding:“13px 0”,fontSize:14,fontWeight:“bold”,cursor:“pointer”}}, “📍 Go”),
+h(‘button’,{onClick:()=>onRoute(sale),style:{flex:1,background:inRoute?”#b8882a”:“transparent”,color:inRoute?”#fff”:”#f5f0e8”,border:“2px solid #b8882a”,borderRadius:10,padding:“13px 0”,fontSize:14,fontWeight:“bold”,cursor:“pointer”}},inRoute?“✓ In Route”:”+ Route”),
+h(‘button’,{onClick:()=>onFav(sale.id),style:{width:50,height:50,borderRadius:10,background:fav?”#ef444422”:“rgba(255,255,255,0.1)”,border:`2px solid ${fav?"#ef4444":"rgba(255,255,255,0.3)"}`,color:”#fff”,fontSize:22,cursor:“pointer”,display:“flex”,alignItems:“center”,justifyContent:“center”}}, fav?“❤️”:“🤍”),
+),
+);
+}
+
+// ── EXPLORE TAB ───────────────────────────────────────────────────────────
+function ExploreTab({sales,routeOrder,toggleRoute}){
+const [favs,setFavs]=useState(new Set());
+const [idx,setIdx]=useState(0);
+const ref=useRef(null);
+const [h,setH]=useState(window.innerHeight);
+
+useEffect(()=>{
+const upd=()=>setH(window.innerHeight);
+window.addEventListener(‘resize’,upd);
+return ()=>window.removeEventListener(‘resize’,upd);
+},[]);
+
+const onVScroll=useCallback(()=>{
+if(!ref.current)return;
+setIdx(Math.round(ref.current.scrollTop/ref.current.offsetHeight));
+},[]);
+
+const listings=[…MOCK_SALES,…sales.filter(s=>!s.isMock)];
+const tabBarH=49; const headerH=57; const totalH=h-tabBarH-headerH;
+
+return h(‘div’,{style:{position:“relative”,height:totalH,overflow:“hidden”}},
+h(‘div’,{style:{position:“absolute”,top:10,right:12,zIndex:20,background:“rgba(0,0,0,0.55)”,color:”#fff”,borderRadius:20,padding:“3px 11px”,fontSize:12,fontWeight:“bold”}},`${idx+1}/${listings.length}`),
+h(‘div’,{ref,onScroll:onVScroll,style:{height:“100%”,overflowY:“scroll”,scrollSnapType:“y mandatory”}},
+listings.map((sale,i)=>h(‘div’,{key:sale.id,style:{scrollSnapAlign:“start”,height:totalH}},
+h(ExploreCard,{sale,fav:favs.has(sale.id),onFav:id=>setFavs(p=>{const n=new Set(p);n.has(id)?n.delete(id):n.add(id);return n;}),inRoute:routeOrder.includes(sale.id),onRoute:s=>toggleRoute(s.id),h}),
+)),
+),
+idx===0&&h(‘div’,{style:{position:“absolute”,bottom:80,left:0,right:0,display:“flex”,justifyContent:“center”,pointerEvents:“none”}},
+h(‘div’,{style:{background:“rgba(0,0,0,0.6)”,color:”#fff”,borderRadius:20,padding:“6px 18px”,fontSize:12}}, “↕ scroll sales  ·  ↔ swipe items”),
+),
+);
+}
+
+// ── SALE CARD ─────────────────────────────────────────────────────────────
+function SaleCard({sale,showZone,onStatus,onDelete,onToggle,inRoute}){
+const [open,setOpen]=useState(false);
+const cfg=STATUS[sale.status];
+const zone=ZONES.find(z=>z.id===sale.zone);
+return h(‘div’,{className:“card-enter”,style:{background:”#fff”,border:`2px solid ${cfg.color}33`,borderLeft:`4px solid ${cfg.color}`,borderRadius:12,overflow:“hidden”,boxShadow:“0 2px 8px rgba(0,0,0,0.06)”,opacity:sale.status===“visited”?.6:1}},
+h(‘div’,{onClick:()=>setOpen(o=>!o),style:{padding:“14px 14px 12px”,cursor:“pointer”}},
+h(‘div’,{style:{display:“flex”,alignItems:“center”,justifyContent:“space-between”,gap:10}},
+h(‘div’,{style:{flex:1,minWidth:0}},
+h(‘div’,{style:{fontSize:15,fontWeight:“bold”,color:”#1a1a1a”,overflow:“hidden”,textOverflow:“ellipsis”,whiteSpace:“nowrap”}},sale.address),
+sale.subdivision&&h(‘div’,{style:{fontSize:12,color:”#b8882a”,fontWeight:“bold”,marginTop:1}},sale.subdivision),
+showZone&&zone&&h(‘div’,{style:{fontSize:11,color:”#888”,marginTop:1}},zone.name),
+sale.time&&h(‘div’,{style:{fontSize:12,color:”#555”,marginTop:3}},`🕐 ${sale.time}${sale.date?" · "+sale.date:""}`),
+sale.notes&&h(‘div’,{style:{fontSize:13,color:”#666”,marginTop:3,lineHeight:1.4}},sale.notes),
+),
+h(‘div’,{style:{display:“flex”,flexDirection:“column”,alignItems:“center”,gap:6,flexShrink:0}},
+h(‘button’,{onClick:e=>{e.stopPropagation();openMaps(sale.address);},style:{background:”#1c3a2a”,color:”#fff”,border:“none”,borderRadius:8,padding:“7px 10px”,fontSize:12,cursor:“pointer”,fontWeight:“bold”,whiteSpace:“nowrap”}},“📍 Go”),
+h(‘span’,{style:{fontSize:18}},cfg.dot),
+),
+),
+),
+open&&h(‘div’,{style:{padding:“0 14px 14px”,borderTop:“1px solid #f0ebe0”,paddingTop:12}},
+h(‘div’,{style:{display:“flex”,gap:6,flexWrap:“wrap”,marginBottom:12}},
+Object.entries(STATUS).map(([k,c])=>h(‘button’,{key:k,onClick:()=>onStatus(sale.id,k),style:{…S.pill(sale.status===k,c.color),padding:“5px 11px”,fontSize:12}},`${c.dot} ${c.label}`)),
+),
+h(‘div’,{style:{display:“flex”,gap:8}},
+h(‘button’,{onClick:()=>onToggle(sale.id),style:{flex:1,padding:“10px 0”,borderRadius:8,border:`2px solid ${inRoute?"#1c3a2a":"#c9bfa8"}`,background:inRoute?”#1c3a2a”:“transparent”,color:inRoute?”#fff”:”#666”,fontSize:13,fontWeight:inRoute?“bold”:“normal”,cursor:“pointer”}},inRoute?“✓ In Route”:”+ Route”),
+h(‘button’,{onClick:()=>onDelete(sale.id),style:{padding:“10px 14px”,borderRadius:8,border:“2px solid #fca5a5”,background:“transparent”,color:”#ef4444”,fontSize:13,cursor:“pointer”}},“Delete”),
+),
+),
+);
+}
+
+// ── ADD MODAL ─────────────────────────────────────────────────────────────
+function AddModal({defaultZone,onSave,onClose}){
+const [f,setF]=useState({address:””,notes:””,status:“want”,time:””,date:””,zone:defaultZone?.id?.toString()||””,subdivision:””});
+const zid=parseInt(f.zone);
+const subs=SUBDIVISIONS[zid]||[];
+const set=k=>e=>setF(p=>({…p,[k]:e.target.value}));
+const save=()=>{
+if(!f.address.trim()||!f.zone)return;
+onSave({id:uid(),address:f.address.trim(),notes:f.notes.trim(),status:f.status,zone:zid,subdivision:f.subdivision,time:f.time,date:f.date,createdAt:new Date().toLocaleDateString()});
+};
+return h(‘div’,{style:{position:“fixed”,inset:0,background:“rgba(0,0,0,0.6)”,display:“flex”,alignItems:“flex-end”,zIndex:200}},
+h(‘div’,{className:“sheet-enter”,style:{background:”#f5f0e8”,borderRadius:“18px 18px 0 0”,padding:`24px 20px calc(env(safe-area-inset-bottom,0px)+20px)`,width:“100%”,maxHeight:“92vh”,overflowY:“auto”}},
+h(‘div’,{style:{display:“flex”,justifyContent:“space-between”,alignItems:“center”,marginBottom:18}},
+h(‘div’,{style:{fontSize:19,fontWeight:“bold”,color:”#1c3a2a”}},“Add Garage Sale”),
+h(‘button’,{onClick:onClose,style:{background:“none”,border:“none”,fontSize:26,cursor:“pointer”,color:”#aaa”,lineHeight:1}},“×”),
+),
+h(‘label’,{style:S.label},“Zone”),
+h(‘select’,{value:f.zone,onChange:e=>{setF(p=>({…p,zone:e.target.value,subdivision:””}));},style:S.input},
+h(‘option’,{value:””},“Select a zone…”),
+ZONES.map(z=>h(‘option’,{key:z.id,value:z.id},`${z.name} — ${z.desc}`)),
+),
+f.zone&&h(‘div’,null,
+h(‘label’,{style:S.label},“Subdivision”),
+h(‘select’,{value:f.subdivision,onChange:set(“subdivision”),style:S.input},
+h(‘option’,{value:””},“Select subdivision…”),
+subs.map(s=>h(‘option’,{key:s,value:s},s)),
+),
+),
+h(‘label’,{style:S.label},“Address”),
+h(‘input’,{value:f.address,onChange:set(“address”),placeholder:“e.g. 1234 Main St”,style:S.input}),
+h(‘div’,{style:{display:“flex”,gap:12}},
+h(‘div’,{style:{flex:1}},h(‘label’,{style:S.label},“Date”),h(‘input’,{type:“date”,value:f.date,onChange:set(“date”),style:S.input})),
+h(‘div’,{style:{flex:1}},h(‘label’,{style:S.label},“Start Time”),h(‘input’,{type:“time”,value:f.time,onChange:set(“time”),style:S.input})),
+),
+h(‘label’,{style:S.label},“Notes”),
+h(‘textarea’,{value:f.notes,onChange:set(“notes”),placeholder:“Furniture, tools, clothing…”,rows:2,style:{…S.input,resize:“vertical”}}),
+h(‘label’,{style:S.label},“Status”),
+h(‘div’,{style:{display:“flex”,gap:7,flexWrap:“wrap”,marginBottom:20}},
+Object.entries(STATUS).map(([k,c])=>h(‘button’,{key:k,onClick:()=>setF(p=>({…p,status:k})),style:S.pill(f.status===k,c.color)},`${c.dot} ${c.label}`)),
+),
+h(‘button’,{onClick:save,style:{…S.btn(”#1c3a2a”,”#f5f0e8”)}},“Save Sale”),
+),
+);
+}
+
+// ── ROOT ──────────────────────────────────────────────────────────────────
+function App(){
+const [sales,setSales]=useState([]);
+const [selZone,setSelZone]=useState(null);
+const [showAdd,setShowAdd]=useState(false);
+const [tab,setTab]=useState(“explore”);
+const [fStatus,setFS]=useState(“all”);
+const [fInc,setFI]=useState(“all”);
+const [fSaf,setFSa]=useState(“all”);
+const [route,setRoute]=useState([]);
+
+const addSale=s=>setSales(p=>[…p,s]);
+const updStatus=(id,st)=>setSales(p=>p.map(s=>s.id===id?{…s,status:st}:s));
+const delSale=id=>{setSales(p=>p.filter(s=>s.id!==id));setRoute(p=>p.filter(r=>r!==id));};
+const toggleRoute=id=>setRoute(p=>p.includes(id)?p.filter(r=>r!==id):[…p,id]);
+const moveStop=(i,d)=>setRoute(p=>{const n=[…p];const sw=i+d;if(sw<0||sw>=n.length)return p;[n[i],n[sw]]=[n[sw],n[i]];return n;});
+const zoneSales=zid=>sales.filter(s=>s.zone===zid);
+const filtSales=sales.filter(s=>{const z=ZONES.find(z=>z.id===s.zone);return(fStatus===“all”||s.status===fStatus)&&(fInc===“all”||z?.income===fInc)&&(fSaf===“all”||z?.safety===fSaf);});
+const filtZones=ZONES.filter(z=>(fInc===“all”||z.income===fInc)&&(fSaf===“all”||z.safety===fSaf));
+const allItems=[…sales,…MOCK_SALES];
+const routeSales=route.map(id=>allItems.find(s=>s.id===id)).filter(Boolean);
+const sortByTime=()=>setRoute([…routeSales].sort((a,b)=>!a.time?1:!b.time?-1:a.time.localeCompare(b.time)).map(s=>s.id));
+
+const TABS=[{id:“explore”,label:“✨ Explore”},{id:“zones”,label:“Zones”},{id:“list”,label:`Sales (${sales.length})`},{id:“route”,label:`Route (${route.length})`}];
+
+return h(‘div’,{style:{display:“flex”,flexDirection:“column”,height:“100vh”,height:“100dvh”,background:”#f5f0e8”,overflow:“hidden”}},
+
+```
+// HEADER
+h('div',{style:{background:"#1c3a2a",padding:"12px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0,paddingTop:"max(12px,env(safe-area-inset-top))"}},
+  h('div',null,
+    h('div',{style:{fontSize:18,fontWeight:"bold",color:"#f5f0e8",letterSpacing:.5}},"🗺️ Longmont Sale Map"),
+    h('div',{style:{fontSize:11,color:"#8aab90",marginTop:1}},`${sales.length} saved · ${route.length} in route`),
+  ),
+  h('button',{onClick:()=>setShowAdd(true),style:{background:"#b8882a",color:"#fff",border:"none",borderRadius:8,padding:"9px 16px",fontSize:14,fontWeight:"bold",cursor:"pointer"}}, "+ Add"),
+),
+
+// FILTER BAR (hidden in explore)
+tab!=="explore"&&h('div',{style:{background:"#1c3a2a",padding:"0 14px 10px",flexShrink:0}},
+  h('div',{style:{fontSize:10,color:"#8aab90",marginBottom:4,textTransform:"uppercase",letterSpacing:.5}},"Filter"),
+  h('div',{style:{display:"flex",gap:5,flexWrap:"wrap"}},
+    [["all","Any $","#555"],["high","💰","#2d6a4f"],["mixed","〰️","#92600a"],["low","📦","#991b1b"]].map(([v,l,c])=>h('button',{key:v,onClick:()=>setFI(v),style:{padding:"3px 10px",borderRadius:12,fontSize:12,border:`2px solid ${fInc===v?c:"#3a5a47"}`,background:fInc===v?c:"transparent",color:fInc===v?"#fff":"#a0bfaa",cursor:"pointer"}},l)),
+    [["all","All","#555"],["high","✅","#1d4ed8"],["mixed","⚠️","#92600a"]].map(([v,l,c])=>h('button',{key:v,onClick:()=>setFSa(v),style:{padding:"3px 10px",borderRadius:12,fontSize:12,border:`2px solid ${fSaf===v?c:"#3a5a47"}`,background:fSaf===v?c:"transparent",color:fSaf===v?"#fff":"#a0bfaa",cursor:"pointer"}},l)),
+  ),
+),
+
+// CONTENT
+h('div',{style:{flex:1,overflow:"hidden",position:"relative"}},
+
+  // EXPLORE
+  tab==="explore"&&h(ExploreTab,{sales,routeOrder:route,toggleRoute}),
+
+  // ZONES
+  tab==="zones"&&h('div',{style:{height:"100%",overflowY:"auto",padding:14}},
+    !selZone
+      ? h('div',{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},
+          filtZones.map(z=>{
+            const zs=zoneSales(z.id);const hasPri=zs.some(s=>s.status==="priority");
+            const inc=INC[z.income];const saf=SAF[z.safety];
+            return h('button',{key:z.id,onClick:()=>setSelZone(z),style:{background:"#fff",border:`2px solid ${hasPri?"#ef4444":zs.length>0?"#f59e0b":"#c9bfa8"}`,borderRadius:12,padding:"13px 11px",textAlign:"left",cursor:"pointer",boxShadow:"0 2px 8px rgba(0,0,0,0.06)"}},
+              h('div',{style:{fontSize:15,fontWeight:"bold",color:"#1c3a2a"}},z.name),
+              h('div',{style:{fontSize:10,color:"#777",marginTop:2,lineHeight:1.4}},z.desc),
+              h('div',{style:{marginTop:6,display:"flex",gap:4}},
+                h('span',{style:{fontSize:11,padding:"2px 7px",borderRadius:8,background:inc.bg,color:inc.color,fontWeight:"bold"}},inc.icon),
+                h('span',{style:{fontSize:11,padding:"2px 7px",borderRadius:8,background:saf.bg,color:saf.color,fontWeight:"bold"}},saf.icon),
+              ),
+              h('div',{style:{marginTop:4,fontSize:12,color:zs.length>0?"#555":"#bbb"}},zs.length===0?"No sales yet":`${zs.length} sale${zs.length!==1?"s":""}${hasPri?" 🔴":""}`),
+            );
+          }),
+        )
+      : h('div',null,
+          h('div',{style:{display:"flex",alignItems:"center",gap:10,marginBottom:14}},
+            h('button',{onClick:()=>setSelZone(null),style:{background:"none",border:"none",fontSize:22,cursor:"pointer",padding:"4px 8px",color:"#1c3a2a"}},"←"),
+            h('div',{style:{flex:1}},
+              h('div',{style:{fontSize:18,fontWeight:"bold",color:"#1c3a2a"}},selZone.name),
+              h('div',{style:{fontSize:12,color:"#888"}},selZone.desc),
+              h('div',{style:{display:"flex",flexWrap:"wrap",gap:5,marginTop:8}},
+                (SUBDIVISIONS[selZone.id]||[]).map(s=>h('span',{key:s,style:{fontSize:11,padding:"3px 9px",borderRadius:12,background:"#e8e2d6",color:"#555",border:"1px solid #c9bfa8"}},s)),
+              ),
+            ),
+            h('button',{onClick:()=>setShowAdd(true),style:{background:"#b8882a",color:"#fff",border:"none",borderRadius:8,padding:"9px 14px",fontSize:13,fontWeight:"bold",cursor:"pointer"}},"+ Add"),
+          ),
+          zoneSales(selZone.id).length===0
+            ? h('div',{style:{textAlign:"center",padding:"40px 20px",color:"#999",background:"#fff",borderRadius:12,border:"1px dashed #c9bfa8"}},"No sales in this zone yet.")
+            : h('div',{style:{display:"flex",flexDirection:"column",gap:10}},zoneSales(selZone.id).map(s=>h(SaleCard,{key:s.id,sale:s,onStatus:updStatus,onDelete:delSale,onToggle:toggleRoute,inRoute:route.includes(s.id)}))),
+        ),
+  ),
+
+  // LIST
+  tab==="list"&&h('div',{style:{height:"100%",overflowY:"auto",padding:14}},
+    h('div',{style:{display:"flex",gap:6,marginBottom:14,overflowX:"auto",paddingBottom:4}},
+      [["all","All"],...Object.entries(STATUS).map(([k,v])=>[k,v.label])].map(([k,l])=>h('button',{key:k,onClick:()=>setFS(k),style:{whiteSpace:"nowrap",padding:"6px 13px",borderRadius:20,border:`2px solid ${fStatus===k?"#1c3a2a":"#c9bfa8"}`,background:fStatus===k?"#1c3a2a":"transparent",color:fStatus===k?"#fff":"#666",fontSize:13,cursor:"pointer"}},l)),
+    ),
+    filtSales.length===0
+      ? h('div',{style:{textAlign:"center",color:"#999",padding:"40px 0"}},"No sales match these filters.")
+      : h('div',{style:{display:"flex",flexDirection:"column",gap:10}},filtSales.map(s=>h(SaleCard,{key:s.id,sale:s,showZone:true,onStatus:updStatus,onDelete:delSale,onToggle:toggleRoute,inRoute:route.includes(s.id)}))),
+  ),
+
+  // ROUTE
+  tab==="route"&&h('div',{style:{height:"100%",overflowY:"auto",padding:14}},
+    routeSales.length===0
+      ? h('div',{style:{textAlign:"center",color:"#999",padding:"50px 20px",background:"#fff",borderRadius:12,border:"1px dashed #c9bfa8"}},"No stops yet.",h('br'),h('span',{style:{fontSize:12}},"Add from any sale card or the Explore feed."))
+      : h('div',null,
+          h('div',{style:{display:"flex",gap:8,marginBottom:14}},
+            h('button',{onClick:()=>openRoute(routeSales),style:{flex:2,...S.btn("#1c3a2a","#fff")}},"🗺️ Open in Maps"),
+            h('button',{onClick:sortByTime,style:{flex:1,...S.btn("transparent","#1c3a2a","2px solid #1c3a2a")}},"⏰ Sort"),
+          ),
+          h('div',{style:{fontSize:12,color:"#888",marginBottom:10}},`${routeSales.length} stops — ↑↓ to reorder`),
+          h('div',{style:{display:"flex",flexDirection:"column",gap:10}},
+            routeSales.map((sale,i)=>h('div',{key:sale.id,style:{display:"flex",gap:8,alignItems:"stretch"}},
+              h('div',{style:{display:"flex",flexDirection:"column",alignItems:"center",gap:3,minWidth:34}},
+                h('button',{onClick:()=>moveStop(i,-1),disabled:i===0,style:{background:i===0?"#e8e2d6":"#1c3a2a",color:i===0?"#bbb":"#fff",border:"none",borderRadius:6,width:30,height:26,cursor:i===0?"default":"pointer",fontSize:13}},"↑"),
+                h('div',{style:{width:30,height:30,borderRadius:"50%",background:"#b8882a",color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,fontWeight:"bold"}},i+1),
+                h('button',{onClick:()=>moveStop(i,1),disabled:i===routeSales.length-1,style:{background:i===routeSales.length-1?"#e8e2d6":"#1c3a2a",color:i===routeSales.length-1?"#bbb":"#fff",border:"none",borderRadius:6,width:30,height:26,cursor:i===routeSales.length-1?"default":"pointer",fontSize:13}},"↓"),
+              ),
+              h('div',{style:{flex:1}},h(SaleCard,{sale,showZone:true,onStatus:updStatus,onDelete:delSale,onToggle:toggleRoute,inRoute:true})),
+            )),
+          ),
+          h('button',{onClick:()=>setRoute([]),style:{marginTop:14,...S.btn("transparent","#ef4444","2px solid #ef4444")}},"Clear Route"),
+        ),
+  ),
+),
+
+// BOTTOM TAB BAR
+h('div',{style:{display:"flex",background:"#1c3a2a",borderTop:"2px solid #b8882a",flexShrink:0,paddingBottom:"env(safe-area-inset-bottom,0px)"}},
+  TABS.map(t=>h('button',{key:t.id,onClick:()=>setTab(t.id),style:{flex:1,padding:"11px 4px 9px",border:"none",background:tab===t.id?"rgba(184,136,42,0.2)":"transparent",color:tab===t.id?"#b8882a":"#8aab90",fontSize:11,fontWeight:tab===t.id?"bold":"normal",cursor:"pointer",borderTop:tab===t.id?"2px solid #b8882a":"2px solid transparent",whiteSpace:"nowrap",lineHeight:1.3}},t.label)),
+),
+
+showAdd&&h(AddModal,{defaultZone:selZone,onSave:s=>{addSale(s);setShowAdd(false);},onClose:()=>setShowAdd(false)}),
+```
+
+);
+}
+
+createRoot(document.getElementById(‘root’)).render(h(App,null));
+</script>
+
+</body>
+</html>
